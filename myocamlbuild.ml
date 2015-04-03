@@ -10,6 +10,21 @@ let lib_dir pkg =
 let target_with_extension ext =
   List.exists (fun s -> Pathname.get_extension s = ext) !Options.targets
 
+let copy from_chan to_chan =
+  try
+    while true do
+      output_string to_chan (input_line from_chan);
+      output_char to_chan '\n';
+    done
+  with _ -> ()
+
+let append source dest =
+  let source_chan = open_in source in
+  let dest_chan   = open_out_gen [Open_append] 0 dest in
+  copy source_chan dest_chan;
+  close_out_noerr dest_chan;
+  close_in_noerr source_chan
+  
 let rec copy_mlt_files path =
   Pathname.readdir path
   |> Array.iter
@@ -17,10 +32,22 @@ let rec copy_mlt_files path =
       if Pathname.is_directory (path / p) then
         copy_mlt_files (path / p)
       else if Pathname.check_extension p "mlt" then
-        let src = path / p in
+        begin
+          let source_file = Pathname.update_extension "ml" p in
+          let append_too  = !Options.build_dir / path / source_file in
+          if Sys.file_exists append_too then
+            begin
+              Log.dprintf 0 "Appending %S to %S\n" p append_too;
+              append p append_too
+            end
+          else
+            Log.dprintf 0 "Test file %S but no source %S\n" p append_too
+        end
+(* let src = path / p in
         let dst = !Options.build_dir / path / p in
         Shell.mkdir_p (!Options.build_dir / path);
         Pathname.copy src dst
+        end *)
       else
         ())
 
@@ -29,13 +56,14 @@ let integrate_coverage = true
 let () =
   let additional_rules =
     function
-      | Before_hygiene  -> if target_with_extension "test" then copy_mlt_files "src"
+      | Before_hygiene  -> ()
       | After_hygiene   -> ()
       | Before_options  -> ()
       | After_options   -> ()
       | Before_rules    -> ()
       | After_rules     ->
           begin
+            if target_with_extension "test" then copy_mlt_files "src";
             rule "Create a test target."
               ~prod:"%.test"
               ~dep:"%.native"
@@ -54,8 +82,8 @@ let () =
                   begin
                     let bsdir = lib_dir "bisect" in
                     flag ["pp"]
-                      (S [P (!Options.build_dir / "tools/joiner.native")
-                         ; A "camlp4o"
+                      (*(S [P (!Options.build_dir / "tools/joiner.native") *)
+                      (S [ A "camlp4o"
                          ; A "str.cma"
                          ; A (bsdir / "bisect_pp.cmo")]);
                     flag ["compile"]
